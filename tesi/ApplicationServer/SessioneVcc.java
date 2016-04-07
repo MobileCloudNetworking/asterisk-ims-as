@@ -4,6 +4,10 @@ import javax.sip.message.Request;
 import javax.sip.message.Response;
 import javax.sip.header.*;
 
+/**
+ * @author Riccardo
+ *
+ */
 public class SessioneVcc {
 
 	public static int firstPort = -1;
@@ -47,6 +51,10 @@ public class SessioneVcc {
 	private Request asteriskInvite;
 	
 	private Request ackMessage;
+	
+	private String tagTo;
+	
+	private String tagFrom;
 
 	private boolean established = false;
 	
@@ -151,6 +159,24 @@ public class SessioneVcc {
 
 	public String getRedirectHost() {
 		return redirectHost;
+	}
+	
+	
+
+	public String getTagTo() {
+		return tagTo;
+	}
+
+	public void setTagTo(String tagTo) {
+		this.tagTo = tagTo;
+	}
+
+	public String getTagFrom() {
+		return tagFrom;
+	}
+
+	public void setTagFrom(String tagFrom) {
+		this.tagFrom = tagFrom;
 	}
 
 	public void setRedirectHost(String redirectHost) {

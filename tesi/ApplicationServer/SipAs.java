@@ -3,6 +3,9 @@ package tesi.ApplicationServer;
 import java.text.ParseException;
 import java.util.ListIterator;
 import java.util.Properties;
+import java.util.StringTokenizer;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.Vector;
 import java.util.ArrayList;
 import java.util.Hashtable;
@@ -43,6 +46,9 @@ import javax.sip.header.CallIdHeader;
 import javax.sip.header.MaxForwardsHeader;
 import javax.sip.address.*;
 
+import java.io.*;
+import java.net.*;
+
 
 
 public class SipAs implements SipListener {
@@ -67,16 +73,16 @@ public class SipAs implements SipListener {
 	
 	private SipProvider sipProvider;
 	
-	private static final String asteriskAddress = "192.168.56.4";
+	private static  String asteriskAddress = "192.168.56.4";
 	
-	private static final int asteriskPort = 5070;
+	private static  int asteriskPort = 5060;
 	
 
-	private static final String localAddress = "192.168.56.1";
+	private static  String localAddress = "192.168.56.1";
 
-	private static final int localPort = 5060;
+	private static  int localPort = 5060;
 
-	private static final String mediaServer = "192.168.56.4";
+	private static  String mediaServer = "192.168.56.4";
 
 	private static final int primaPortaLibera = 33330;
 	
@@ -92,7 +98,8 @@ public class SipAs implements SipListener {
 	
 	private Hashtable byeTable = null;
 	
-
+	private static Hashtable<String,Integer> asteriskPool = new Hashtable<String,Integer>();
+	
 	
 	//private Hashtable sessionProgressTable=null;
 	
@@ -105,15 +112,77 @@ public class SipAs implements SipListener {
 	 * @param args
 	 */
 	public static void main(String[] args) {
+		byte[] receivedData = new byte[1024];
+		
+		switch(args.length)
+		{
+			case 0:
+			{
+				
+			}break;
+			
+			case 4:
+			{
+				localAddress = args[0];
+				localPort = Integer.parseInt(args[1]);
+				asteriskAddress = args[2];
+				asteriskPort = Integer.parseInt(args[3]);
+				mediaServer = asteriskAddress;
+			}break;
+			
+			default:
+			{
+				System.out.println("\nError in launching SipAs...\n");
+				System.out.println("SipAs can be launched with no arguments or four, localAddress localPort asteriskAddress asteriskPort...\n");
+				System.exit(-1);
+			}break;
+		}
 		// TODO Auto-generated method stub
+		
 		new SipAs().init();
+		try {
+			DatagramSocket ds = new DatagramSocket(5070);
+			while(true)
+			{
+				DatagramPacket dp = new DatagramPacket(receivedData, receivedData.length);
+				System.out.println("A Service UDP socket has been opened at "+localAddress+":5070");
+				ds.receive(dp);
+				String data = new String(dp.getData());
+				StringTokenizer st = new StringTokenizer(data,"@");
+				String action =st.nextToken();
+				String address = st.nextToken();
+				int port = Integer.parseInt(st.nextToken().trim());
+				if(action.compareTo("add")==0)
+				{
+					//add
+					asteriskPool.put(address, port);
+					System.out.println("A new Asterisk VM instance has been added at "+address+":"+port);
+				}
+				else
+				{
+					//remove
+					asteriskPool.remove(address);
+					System.out.println("The Asterisk VM instance at "+address+":"+port+" has been removed");
+				}
+			}
+		} catch (SocketException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+	
 	}
+
+	
 
 	private void init() {
 		// TODO Auto-generated method stub
 	
 		table = new Hashtable();
 		asteriskTable = new Hashtable();
+		asteriskPool = new Hashtable<String,Integer>();
 		//inviteOKTable = new Hashtable();
 		okSemaforo = new Hashtable();
 		ringingSemaforo=new Hashtable();
@@ -163,7 +232,7 @@ public class SipAs implements SipListener {
 			
 			sipProvider.setAutomaticDialogSupportEnabled(false);
 			
-			System.out.println("Creato provider udp in ascolto su: "
+			System.out.println("An UDP Provider is created on: "
 					+ localAddress + ":" + localPort);
 			sipProvider.addSipListener(this);
 			
@@ -178,7 +247,7 @@ public class SipAs implements SipListener {
 
 	public void processRequest(RequestEvent requestEvent) {
 		// TODO Auto-generated method stub
-		System.out.println("Processo una richiesta...");
+		System.out.println("Processing a Request...");
 		Request request = requestEvent.getRequest();
 		System.out.println(request);
 		CSeqHeader cSeq = (CSeqHeader) request.getHeader("CSeq");
@@ -259,8 +328,8 @@ public class SipAs implements SipListener {
 			String userAgent= null;
 			if(userAgentHeader != null)
 			    userAgent = userAgentHeader.getProduct().next().toString();
-			System.out.println("Processo un BYE");
-			if(userAgent!= null &&userAgent.equalsIgnoreCase("Asterisk"))
+			System.out.println("Processing a BYE request");
+			if(userAgent!= null &&userAgent.contains("Asterisk")/*.equalsIgnoreCase("Asterisk")*/)
 			{
 				processAsteriskBye(request);
 			}
@@ -287,7 +356,7 @@ public class SipAs implements SipListener {
 	}
 
 	public void processResponse(ResponseEvent responseEvent) {
-		System.out.println("Processo una risposta...");
+		System.out.println("Processing a Response...");
 		Response response = responseEvent.getResponse();
 		System.out.println(response);
 
@@ -368,11 +437,18 @@ public class SipAs implements SipListener {
 		if(response.getStatusCode()==Response.OK && cSeq.getMethod().equals("BYE"))
 		{
 			UserAgentHeader userAgentHeader = (UserAgentHeader)response.getHeader("User-Agent");
-			if(userAgentHeader!=null)
+			// add by me, checking server header
+			ServerHeader server = (ServerHeader) response.getHeader("Server");
+			if(userAgentHeader!=null || server!=null)
 			{
-				String userAgent = userAgentHeader.getProduct().next().toString();
-			    if(userAgent.equalsIgnoreCase("Asterisk"))
-			           processAsteriskByeOK(response);
+			
+				//String userAgent = userAgentHeader.getProduct().next().toString();
+			    if(/*userAgent.contains("Asterisk") ||*/ server.toString().contains("Asterisk"))
+			    {
+			    	
+			    	 processAsteriskByeOK(response);
+			    }
+			          
 			    else
 			    	{
 			    		inoltraByeOKToAsterisk(response);
@@ -389,6 +465,7 @@ public class SipAs implements SipListener {
 			}
 		    else
 		    {
+	
 	    		inoltraByeOKToAsterisk(response);
 	    		try{
 	    			SipUtils.removeViaHeader(response);
@@ -450,7 +527,7 @@ public class SipAs implements SipListener {
 		    	  
 		    	ArchivioSessioniVcc archivioSessioniVcc = ArchivioSessioniVcc.getInstance();
 			    SessioneVcc sessione = archivioSessioniVcc.get(request);
-			    System.out.println("\n\n\nSESSIONE:\n"+sessione);
+			    System.out.println("\n\n\nSESSION:\n"+sessione);
 			    
 			    //Se il messaggio di INVITE o re-INVITE riattraversa il SipAS per la seconda volta
 		    	if((sessione!=null) && (sessione.isEstablished()==false))
@@ -490,7 +567,8 @@ public class SipAs implements SipListener {
 	
 	private void processAsteriskInvite(Request asteriskRequest)
 	{
-		System.out.println("PROCESSIN A INVITE from ASTERISK");
+		System.out.println("PROCESSING A INVITE from ASTERISK");
+		
 		String from = ((FromHeader)asteriskRequest.getHeader("From")).getAddress().getDisplayName();
 		Request request = (Request) table.get(from);
 		ToHeader to= (ToHeader) request.getHeader("To");
@@ -522,9 +600,12 @@ public class SipAs implements SipListener {
 					.createContentTypeHeader("application", "sdp"));
 			ArchivioSessioniVcc archivio = ArchivioSessioniVcc.getInstance();
 			SessioneVcc sessione = archivio.get(request);
+			String tag = ((FromHeader) asteriskRequest.getHeader("From")).getTag();
 			sessione.setAsteriskInvite(request);
+			sessione.setTagFrom(tag);
 			asteriskTable.put(from, asteriskRequest);
 			System.out.println(request);
+			System.out.println("\n     Sending the follow request       \n"+request);
 			sipProvider.sendRequest(request);
 			System.out.println("     SENT       ");
 			
@@ -594,13 +675,20 @@ public class SipAs implements SipListener {
 			asteriskResponse.setReasonPhrase("OK");
 			SipUtils.removeViaHeader(asteriskResponse);
 			SessionDescription sd = SipUtils.getSessionDescription(response);
+			//add by RV trying to adjust sdp packets
 			SessionDescription newSD = SipUtils.makeSessionDescription(sd, qChiamato);
-			asteriskResponse.setContent(newSD,
-					headerFactory.createContentTypeHeader("application","sdp"));
+			
+//			asteriskResponse.setContent(newSD,
+//					headerFactory.createContentTypeHeader("application","sdp"));
+			asteriskResponse.setContent(sd, headerFactory.createContentTypeHeader("application","sdp"));
+			//end: add by RV trying to adjust sdp packets
 			System.out.println("SENDING THE 200 OK:\n"+asteriskResponse);
 			sessione.setInviteOK(response);
 			sessione.setOkToAsterisk(asteriskResponse);
+			//add by RV trying to adjust sdp packets
 			sipProvider.sendResponse(asteriskResponse);
+//			sipProvider.sendResponse(response);
+			//end: add by RV trying to adjust sdp packets
 			}
 			catch(Exception e)
 			{
@@ -632,19 +720,33 @@ public class SipAs implements SipListener {
 		
 		System.out.println("FORWARDING  BYE TO ASTERISK");
 		try{
+		ArchivioSessioniVcc archive = ArchivioSessioniVcc.getInstance();
+		SessioneVcc session = archive.get(request);
 		FromHeader from = (FromHeader) request.getHeader("From");
+		ToHeader to = (ToHeader) request.getHeader("To"); 
+		//		Address fromAddress = from.getAddress();
+
 		Address fromAddress = from.getAddress();
 		byeTable.put(fromAddress.getDisplayName(), request);
-		ToHeader to = (ToHeader) request.getHeader("To");
+		//ToHeader to = (ToHeader) request.getHeader("To");
 		String user = ((SipURI)to.getAddress().getURI()).getUser();
 		SipURI contactUri = addressFactory.createSipURI(null, user+"@"+asteriskAddress);
-		contactUri.setPort(5070);
+		contactUri.setPort(asteriskPort);
 		System.out.println(contactUri);
 		CallIdHeader callId = (CallIdHeader) request.getHeader("Call-ID");
 		CSeqHeader cSeq = (CSeqHeader) request.getHeader("CSeq");
 		
 		ListIterator viaHeaders = request.getHeaders("Via");
 		ArrayList vias = new ArrayList();
+		// add by me -- modifing the tag
+	
+		String tag1= from.getTag();
+		System.out.println("Session : "+session.toString()+"\t tag: ");
+		System.out.println(tag1+"\n");
+		
+		from.setTag(tag1);
+		to.setTag(session.getTagTo());
+		//end add by me
 		while(viaHeaders.hasNext())
 		{
 			vias.add(viaHeaders.next());
@@ -658,7 +760,7 @@ public class SipAs implements SipListener {
 //		asteriskRequest.addHeader(assertedIdentity);
 		Address toAddress = to.getAddress();
 		AddressImpl astAddress = new AddressImpl();
-		SipURI asteriskUri = addressFactory.createSipURI(null, "10.0.1.5");
+		SipURI asteriskUri = addressFactory.createSipURI(null, asteriskAddress);
 		asteriskUri.setPort(5070);
 		astAddress.setAddess(asteriskUri);
 		
@@ -669,7 +771,7 @@ public class SipAs implements SipListener {
 		
 		catch(Exception e)
 		{
-			System.out.println("ERRORE NELL'INVIO DEL BYE A ASTERISK");
+			System.out.println("Error in sending BYE to ASTERISK");
 			e.printStackTrace();
 		}
 		
@@ -732,14 +834,14 @@ public class SipAs implements SipListener {
 				System.out.println("\n\n\nOK RESPONSE:\n"+okResponse);
 				sipProvider.sendResponse(okResponse);
 			} catch (Exception e) {
-				System.out.println("ERRORE NEL MANDARE L'OK AL REINVITE");
+				System.out.println("ERROR in sending the RE-INVITE OK");
 				e.printStackTrace();
 			}
 			
 			
 			//Viene mandato il re-INVITE ad Asterisk
 			
-			System.out.println("\n\nFORWARD  REINVITE TO ASTERISK");
+			System.out.println("\n\nFORWARD  RE-INVITE TO ASTERISK");
 			Request inviteToAsterisk = (Request) sessione.getInviteToAsterisk().clone();
 			
 
@@ -757,7 +859,7 @@ public class SipAs implements SipListener {
 				sipProvider.sendRequest(inviteToAsterisk);
 				
 			} catch (Exception e) {
-				System.out.println("ERRORE NEL MANDARE IL RE-INVITE A ASTERISK");
+				System.out.println("ERROR sending RE-INVITE to ASTERISK");
 				e.printStackTrace();
 			}	
 			
@@ -803,7 +905,7 @@ public class SipAs implements SipListener {
 	
 
 	private void estraiSdpMedia(Message message) {
-		System.out.println("Estraggo SdpMedia...");
+		System.out.println("Extracting SdpMedia...");
 		SessionDescription sessionDescriptor = SipUtils
 				.getSessionDescription(message);
 		if (sessionDescriptor == null)
@@ -844,7 +946,7 @@ public class SipAs implements SipListener {
 				}
 
 			}
-        System.out.println("SdpMedia Estratti");
+        System.out.println("SdpMedia Extracted");
 		} catch (Exception e) {
 			// TODO: handle exception
 			e.printStackTrace();
@@ -941,9 +1043,12 @@ public class SipAs implements SipListener {
 			invite.removeHeader("Route");
 			SessionDescription oldSd = SipUtils.getSessionDescription(invite);
 			SessionDescription newSd = SipUtils.makeSessionDescription(oldSd, qChiamato);
-			invite.removeContent();
-			invite.setContent(newSd, headerFactory.createContentTypeHeader("application","sdp"));
 			
+			// add by me, trying to adjust sdp packets
+//			invite.removeContent();
+//			invite.setContent(newSd, headerFactory.createContentTypeHeader("application","sdp"));
+			
+			// end add by me, trying to adjust sdp packets
 			ArchivioSessioniVcc archivio = ArchivioSessioniVcc.getInstance();
 			SessioneVcc sessione = archivio.get(request);
 			sessione.setInviteToAsterisk(invite);
@@ -977,6 +1082,10 @@ public class SipAs implements SipListener {
 			
 			System.out.println("\n\n ASTERISK'S RINGING\n");
 			SipUtils.removeViaHeader(response);
+			String tag = ((ToHeader)response.getHeader("To")).getTag();
+			ArchivioSessioniVcc archivio = ArchivioSessioniVcc.getInstance();
+			SessioneVcc sessione = archivio.get(response);
+			sessione.setTagTo(tag);
 			try{
 			sipProvider.sendResponse(response);
 			}
@@ -1069,6 +1178,8 @@ public class SipAs implements SipListener {
 		    RouteHeader rh = (RouteHeader) headerFactory.createRouteHeader(((ToHeader)request.getHeader("To")).getAddress());
 		    request.addHeader(rh);
 		    // fine
+		    to.setTag(sessione.getTagTo());
+		    request.setHeader(to);
 			sipProvider.sendRequest(request);
 			Request asteriskAckRequest = (Request) request.clone();
 			SipURI asteriskUri = addressFactory.createSipURI(null, asteriskAddress);
@@ -1128,7 +1239,14 @@ public class SipAs implements SipListener {
 	
 	private void processAsteriskByeOK(Response response)
 	{
-		response.removeHeader("Via");
+		SipUtils.removeViaHeader(response);
+		//the first ok from Asterisk must be ignored
+//		try {
+//			sipProvider.sendResponse(response);
+//		} catch (SipException e) {
+//			// TODO Auto-generated catch block
+//			e.printStackTrace();
+//		}
 		
 	}
 	
@@ -1136,19 +1254,42 @@ public class SipAs implements SipListener {
 	private void processAsteriskBye(Request request)
 	{
 		try{
-		String from = ((FromHeader)request.getHeader("From")).getAddress().getDisplayName();
-		Request byeRequest = (Request) byeTable.get(from);
-		System.out.println("\n\n\nBYE REQUEST, FIRST\n"+byeRequest);
-		byeRequest = SipUtils.gestisciRouting(byeRequest);
 		
-		System.out.println("\nBYE REQUEST, THEN\n"+byeRequest);
-		String key = from + "Asterisk";
+		ToHeader to = (ToHeader) request.getHeader("To");
+			
+		String name = to.getName();
+		Address displayName = to.getAddress();
+		StringTokenizer st = new StringTokenizer(displayName.toString(), "@");
+		String firstStep = st.nextToken(); // getting the first token <sip:name
+		st = new StringTokenizer(firstStep,":");
+		st.nextToken();
+		String trueName = st.nextToken();
+		displayName.setDisplayName(trueName);
+		to.setAddress(displayName);
+		request.setHeader(to);	
+		//String from = ((FromHeader)request.getHeader("From")).getAddress().getDisplayName();
+		String toName = ((ToHeader)request.getHeader("To")).getAddress().getDisplayName();
+		Request byeRequest = (Request) byeTable.get(toName);
+//		System.out.println("\n\n\nBYE REQUEST, FIRST\n"+byeRequest);
+//		//byeRequest = SipUtils.gestisciRouting(byeRequest);
+//		
+//		System.out.println("\nBYE REQUEST, THEN\n"+byeRequest);
+		
+//		System.out.println("\n\n\n displayName: "+displayName+"\n FirstStep: "+firstStep+"\n trueName: "+trueName+"\n\n\n");
+//		System.out.println("\n\n Stringhe prova nome\n\n nome: "+name+"\n displayName: "+displayName+"\n\n Fine Stringhe prova nome\n\n");
+		String key = toName + "Asterisk";
+//		System.out.println("\nLa CHIAVE: "+key);
 		byeTable.put(key, request);
+		// added by me
+		RouteHeader rh = (RouteHeader) headerFactory.createRouteHeader(((ToHeader)byeRequest.getHeader("To")).getAddress());
+		byeRequest.setHeader(rh);
+		System.out.println("\nAdded route header... sending request\n"+byeRequest);
+		//end added by me
 		sipProvider.sendRequest(byeRequest);
 		}
 		catch(Exception e)
 		{
-			System.out.println("ERRORE NELL'INVIO DEL BYE DA PARTE DI ASTERISK");
+			System.out.println("ERROR in BYE sent by ASTERISK");
 			e.printStackTrace();
 		}
 	}
@@ -1168,7 +1309,7 @@ public class SipAs implements SipListener {
 		}
 		catch(Exception e)
 		{
-			System.out.println("ERRORE NELL INOLTRARE L'OK AL BYE VERSO ASTERISK");
+			System.out.println("ERROR in forwarding bye OK to ASTERISK");
 			e.printStackTrace();
 		}
 	}
@@ -1267,7 +1408,7 @@ public class SipAs implements SipListener {
 		}
 		catch(Exception e)
 		{
-			System.out.println("ERRORE NELL'INVIARE L'ACK");
+			System.out.println("ERROR sending ACK");
 			e.printStackTrace();
 		}
 		
@@ -1279,16 +1420,18 @@ public class SipAs implements SipListener {
 		SessioneVcc sessione = archivio.get(response);
 		if(sessione.isEstablished()==false)
 		{
-			System.out.println("PROCESSO L'OK PROVENIENTE DA ASTERISK");
+			System.out.println("PROCESSING OK FROM ASTERISK");
 			try{
-		
+			ToHeader to = (ToHeader) response.getHeader("To");
+			String tag = to.getTag();
+		//	sessione.setAsteriskOK(asteriskOK);
 			Response okResponse = (Response)sessione.getInviteOK().clone();
 			SipUtils.removeViaHeader(okResponse);
 			SessionDescription sd = SipUtils.getSessionDescription(okResponse);
 			SessionDescription newSd = SipUtils.makeSessionDescription(sd, qChiamante);
 			okResponse.removeContent();
 			okResponse.setContent(newSd, headerFactory.createContentTypeHeader("application","sdp"));
-	
+			
 			sipProvider.sendResponse(okResponse);
 			}catch(Exception e)
 			{
