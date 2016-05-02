@@ -35,6 +35,7 @@ public class SipUtils {
 	 * @throws Exception
 	 */
 	public static Request gestisciRouting(Request request) {
+		System.out.println("\n\n ECCOMIIIIIIIIIII \n\n");
 		HeaderFactory headerFactory = null;
 		try {
 			headerFactory = SipFactory.getInstance().createHeaderFactory();

@@ -1,7 +1,6 @@
 package tesi.ApplicationServer;
 
 public class AsteriskEndPoint {
-	
 	private String address;
 	private int port;
 	public String getAddress() {
@@ -36,5 +35,4 @@ public class AsteriskEndPoint {
 			return false;
 		
 	}
-
 }
